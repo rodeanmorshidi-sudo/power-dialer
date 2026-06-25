@@ -31,7 +31,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 // Serve the dialer page + twilio-telephony.js from /public
-app.use(express.static(path.join(__dirname, 'public')));
+app.use('/twilio-sdk.js', express.static(path.join(__dirname, 'node_modules/@twilio/voice-sdk/dist/twilio.min.js')));
 
 // --- 1. Issue an access token for a browser agent ---------------
 app.get('/token', (req, res) => {
