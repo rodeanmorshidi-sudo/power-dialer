@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Power Dialer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<!-- TO GO LIVE, uncomment these two lines:
+<script src="https://sdk.twilio.com/js/voice/releases/2.12.3/twilio.min.js"></script>
+<script src="twilio-telephony.js"></script>
+-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  :root {
+    --ink:        #14171D;
+    --panel:      #1B1F27;
+    --panel-2:    #21262F;
+    --line:       #2C323D;
+    --line-soft:  #242a33;
+    --text:       #E8EAED;
+    --text-dim:   #9AA3AF;
+    --text-faint: #6B7280;
+
+    --live:       #3DBE8B;  /* connected */
+    --live-glow:  rgba(61,190,139,0.30);
+    --ring:       #E0A33E;  /* dialing / ringing */
+    --ring-glow:  rgba(224,163,62,0.28);
+    --end:        #E0654E;  /* hang up / danger */
+    --accent:     #6E9BF0;  /* neutral interactive */
+
+    --r:   10px;
+    --r-s: 7px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --disp: 'Space Grotesk', system-ui, sans-serif;
+    --body: 'Inter', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--panel) 0%, var(--ink) 100%);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand-dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--live); box-shadow: 0 0 0 4px var(--live-glow);
+  }
+  .brand h1 {
+    font-family: var(--disp);
+    font-size: 15px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .brand .mode {
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ring); border: 1px solid var(--ring);
+    padding: 2px 7px; border-radius: 100px; margin-left: 4px;
+  }
+
+  .stats { display: flex; gap: 26px; }
+  .stat { text-align: right; }
+  .stat .k {
+    font-family: var(--disp); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.11em; text-transform: uppercase; color: var(--text-faint);
+  }
+  .stat .v {
+    font-family: var(--mono); font-size: 19px; font-weight: 600;
+    line-height: 1.1; color: var(--text);
+  }
+  .stat .v.good { color: var(--live); }
+
+  /* ---------- Body grid ---------- */
+  .main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 0;
+  }
+
+  /* ---------- Left: queue ---------- */
+  .queue {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .queue-head {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .queue-head .row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .queue-head h2 {
+    font-family: var(--disp); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+  }
+  .count-pill {
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  }
+  .count-pill b { color: var(--text); }
+
+  .progress {
+    height: 4px; border-radius: 100px; background: var(--line);
+    overflow: hidden;
+  }
+  .progress > i {
+    display: block; height: 100%; width: 0%;
+    background: var(--live); transition: width .4s ease;
+  }
+
+  .import-row { display: flex; gap: 8px; margin-top: 12px; }
+
+  .contacts {
+    flex: 1; overflow-y: auto; padding: 6px;
+  }
+  .contacts::-webkit-scrollbar { width: 9px; }
+  .contacts::-webkit-scrollbar-thumb { background: var(--line); border-radius: 100px; border: 2px solid var(--panel); }
+
+  .ct {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: var(--r-s);
+    cursor: pointer; border: 1px solid transparent;
+    transition: background .12s ease;
+  }
+  .ct:hover { background: var(--panel-2); }
+  .ct.active { background: var(--panel-2); border-color: var(--line); }
+  .ct.done { opacity: 0.5; }
+  .ct-status {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--line);
+  }
+  .ct.done .ct-status { background: var(--live); }
+  .ct.active .ct-status { background: var(--ring); box-shadow: 0 0 0 3px var(--ring-glow); }
+  .ct-main { min-width: 0; flex: 1; }
+  .ct-name {
+    font-weight: 500; font-size: 13px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .ct-sub {
+    font-size: 11px; color: var(--text-faint); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .ct-disp {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .03em;
+    color: var(--text-dim); text-transform: uppercase; flex-shrink: 0;
+  }
+
+  .empty-queue {
+    padding: 40px 20px; text-align: center; color: var(--text-faint);
+  }
+  .empty-queue p { font-size: 13px; margin-bottom: 16px; line-height: 1.5; }
+
+  /* ---------- Right: call stage ---------- */
+  .stage {
+    display: flex; flex-direction: column;
+    min-height: 0; background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(110,155,240,0.05), transparent 60%),
+      var(--ink);
+  }
+  .stage-inner {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px; min-height: 0; overflow-y: auto;
+  }
+
+  .contact-card { text-align: center; margin-bottom: 22px; }
+  .contact-card .who {
+    font-family: var(--disp); font-size: 30px; font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .contact-card .meta {
+    color: var(--text-dim); font-size: 14px; margin-top: 4px;
+  }
+  .contact-card .num {
+    font-family: var(--mono); font-size: 15px; color: var(--text-dim);
+    margin-top: 10px; letter-spacing: 0.02em;
+  }
+
+  /* status core — the signature element */
+  .core-wrap { position: relative; width: 188px; height: 188px; margin: 6px 0 18px; }
+  .core-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid var(--line);
+  }
+  .core-pulse {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 2px solid var(--ring); opacity: 0;
+  }
+  .core {
+    position: absolute; inset: 26px; border-radius: 50%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 35%, var(--panel-2), var(--panel));
+    border: 1px solid var(--line);
+    transition: box-shadow .4s ease, border-color .4s ease;
+  }
+  .core .state-label {
+    font-family: var(--disp); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim);
+  }
+  .core .timer {
+    font-family: var(--mono); font-size: 38px; font-weight: 600;
+    line-height: 1.1; margin-top: 6px; letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .core .hint { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+
+  /* state styling */
+  .stage[data-state="dialing"] .core,
+  .stage[data-state="ringing"] .core {
+    border-color: var(--ring);
+    box-shadow: 0 0 40px -8px var(--ring-glow), inset 0 0 30px -16px var(--ring-glow);
+  }
+  .stage[data-state="ringing"] .core-pulse { animation: pulse 1.4s ease-out infinite; }
+  .stage[data-state="connected"] .core {
+    border-color: var(--live);
+    box-shadow: 0 0 50px -6px var(--live-glow), inset 0 0 30px -14px var(--live-glow);
+  }
+  .stage[data-state="connected"] .core .timer { color: var(--live); }
+  .stage[data-state="connected"] .core .state-label { color: var(--live); }
+  .stage[data-state="dialing"] .core .state-label,
+  .stage[data-state="ringing"] .core .state-label { color: var(--ring); }
+  .stage[data-state="wrapup"] .core { border-color: var(--accent); }
+
+  @keyframes pulse {
+    0%   { opacity: .8; transform: scale(1); }
+    100% { opacity: 0;  transform: scale(1.18); }
+  }
+
+  /* controls */
+  .controls { display: flex; gap: 12px; align-items: center; }
+
+  .btn {
+    font-family: var(--disp); font-weight: 600; font-size: 13px;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--text); border-radius: var(--r);
+    padding: 11px 18px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: transform .08s ease, background .12s ease, border-color .12s ease, opacity .12s;
+  }
+  .btn:hover { background: var(--line); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn .kbd {
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+
+  .btn-dial { background: var(--live); border-color: var(--live); color: #06241a; }
+  .btn-dial:hover { background: #34a878; }
+  .btn-dial .kbd { color: #0a3a2a; border-color: rgba(6,36,26,.3); }
+
+  .btn-end { background: var(--end); border-color: var(--end); color: #2a0c06; }
+  .btn-end:hover { background: #cf5642; }
+
+  .btn-ghost { background: transparent; }
+
+  .btn-mute.on { background: var(--ring); border-color: var(--ring); color: #2a1d04; }
+
+  /* wrap-up panel */
+  .wrapup { width: 100%; max-width: 540px; }
+  .wrapup h3 {
+    font-family: var(--disp); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+    margin-bottom: 10px; text-align: center;
+  }
+  .dispo-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    margin-bottom: 14px;
+  }
+  .dispo {
+    font-family: var(--disp); font-size: 13px; font-weight: 500;
+    padding: 12px 10px; border-radius: var(--r-s);
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 9px;
+    transition: border-color .12s, background .12s;
+  }
+  .dispo:hover { background: var(--panel-2); }
+  .dispo.sel { border-color: var(--accent); background: rgba(110,155,240,0.1); }
+  .dispo .n {
+    font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .dispo .swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+
+  textarea {
+    width: 100%; resize: none; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r-s);
+    color: var(--text); font-family: var(--body); font-size: 13px;
+    padding: 11px 12px; min-height: 64px; margin-bottom: 14px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea::placeholder { color: var(--text-faint); }
+
+  .wrapup-actions { display: flex; gap: 10px; justify-content: center; }
+
+  /* ---------- Call log ---------- */
+  .log {
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    max-height: 168px; display: flex; flex-direction: column;
+  }
+  .log-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 16px; border-bottom: 1px solid var(--line-soft);
+  }
+  .log-head h2 {
+    font-family: var(--disp); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim);
+  }
+  .log-body { overflow-y: auto; }
+  .log-row {
+    display: grid; grid-template-columns: 64px 1fr 88px 56px;
+    gap: 12px; align-items: center;
+    padding: 7px 16px; border-bottom: 1px solid var(--line-soft);
+    font-size: 12px;
+  }
+  .log-row:last-child { border-bottom: none; }
+  .log-time { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+  .log-who { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-who small { color: var(--text-faint); font-weight: 400; }
+  .log-dur { font-family: var(--mono); font-size: 11px; color: var(--text-dim); text-align: right; }
+  .log-out {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .04em;
+    text-transform: uppercase; text-align: right; font-weight: 600;
+  }
+  .log-empty { padding: 16px; text-align: center; color: var(--text-faint); font-size: 12px; }
+
+  .hidden { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 720px) {
+    .main { grid-template-columns: 1fr; }
+    .queue { display: none; }
+    .stats { gap: 16px; }
+    .stat .v { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Power Dialer</h1>
+      <span class="mode" id="modeBadge">Demo</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">Dials</div><div class="v" id="sDials">0</div></div>
+      <div class="stat"><div class="k">Connects</div><div class="v good" id="sConnects">0</div></div>
+      <div class="stat"><div class="k">Connect rate</div><div class="v" id="sRate">—</div></div>
+      <div class="stat"><div class="k">Talk time</div><div class="v" id="sTalk">0:00</div></div>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Queue -->
+    <aside class="queue">
+      <div class="queue-head">
+        <div class="row">
+          <h2>Call list</h2>
+          <span class="count-pill"><b id="qDone">0</b> / <span id="qTotal">0</span></span>
+        </div>
+        <div class="progress"><i id="qBar"></i></div>
+        <div class="import-row">
+          <button class="btn btn-ghost" style="flex:1" id="btnUpload">Upload CSV</button>
+          <button class="btn btn-ghost" style="flex:1" id="btnSample">Sample list</button>
+          <input type="file" id="fileInput" accept=".csv" class="hidden" />
+        </div>
+      </div>
+      <div class="contacts" id="contacts">
+        <div class="empty-queue">
+          <p>No contacts loaded.<br>Drop in a CSV with name, company, and phone columns, or start with a sample list.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Call stage -->
+    <section class="stage" id="stage" data-state="idle">
+      <div class="stage-inner">
+
+        <div class="contact-card" id="contactCard">
+          <div class="who" id="cName">Ready to dial</div>
+          <div class="meta" id="cMeta">Load a list to begin</div>
+          <div class="num" id="cNum"></div>
+        </div>
+
+        <div class="core-wrap">
+          <div class="core-ring"></div>
+          <div class="core-pulse"></div>
+          <div class="core">
+            <div class="state-label" id="coreLabel">Idle</div>
+            <div class="timer" id="coreTimer">0:00</div>
+            <div class="hint" id="coreHint"></div>
+          </div>
+        </div>
+
+        <!-- idle / live controls -->
+        <div class="controls" id="liveControls">
+          <button class="btn btn-dial" id="btnDial" disabled>Dial<span class="kbd">space</span></button>
+          <button class="btn btn-ghost" id="btnSkip" disabled>Skip<span class="kbd">s</span></button>
+          <button class="btn btn-mute hidden" id="btnMute">Mute<span class="kbd">m</span></button>
+          <button class="btn btn-end hidden" id="btnEnd">Hang up<span class="kbd">space</span></button>
+        </div>
+
+        <!-- wrap-up -->
+        <div class="wrapup hidden" id="wrapup">
+          <h3>Disposition</h3>
+          <div class="dispo-grid" id="dispoGrid"></div>
+          <textarea id="notes" placeholder="Notes (optional)"></textarea>
+          <div class="wrapup-actions">
+            <button class="btn btn-dial" id="btnSaveNext">Save &amp; next<span class="kbd">enter</span></button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Call log -->
+      <div class="log">
+        <div class="log-head"><h2>Call log</h2><span class="count-pill" id="logCount"></span></div>
+        <div class="log-body" id="logBody">
+          <div class="log-empty">Completed calls will appear here.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   TELEPHONY LAYER
+   The UI talks to telephony through this interface only:
+     dial(number), hangup(), setMute(bool), and the callbacks
+     onRinging / onConnected / onDisconnected / onError.
+   Swap DemoTelephony for TwilioTelephony (twilio-telephony.js)
+   to place real calls. Nothing else in the UI changes.
+   ============================================================ */
+function DemoTelephony() {
+  let timers = [];
+  const clear = () => { timers.forEach(clearTimeout); timers = []; };
+  const api = {
+    onRinging() {}, onConnected() {}, onDisconnected() {}, onError() {},
+    dial(number) {
+      clear();
+      timers.push(setTimeout(() => api.onRinging(), 500));
+      timers.push(setTimeout(() => api.onConnected(), 2100)); // Twilio bridges the call; rep judges the outcome
+    },
+    hangup() { clear(); api.onDisconnected(); },
+    setMute(/* bool */) {}
+  };
+  return api;
+}
+
+/* DEMO MODE (default): simulated calls, no Twilio needed.
+   TO GO LIVE: (1) uncomment the two <script> tags in <head> above,
+   (2) comment out the DemoTelephony line, (3) uncomment the
+   TwilioTelephony line. backendUrl:'' means "same site that served
+   this page", which is correct when server.js serves it. */
+const phone = DemoTelephony();
+// const phone = TwilioTelephony({ backendUrl: '', agent: 'dean' });
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const DISPOSITIONS = [
+  { id: 'connected',  label: 'Connected',    color: '#3DBE8B', counts: true  },
+  { id: 'voicemail',  label: 'Voicemail',    color: '#E0A33E', counts: false },
+  { id: 'no-answer',  label: 'No answer',    color: '#6B7280', counts: false },
+  { id: 'callback',   label: 'Callback',     color: '#6E9BF0', counts: false },
+  { id: 'wrong-num',  label: 'Wrong number', color: '#E0654E', counts: false },
+  { id: 'dnc',        label: 'Do not call',  color: '#E0654E', counts: false },
+];
+
+const state = {
+  contacts: [],
+  idx: -1,
+  phase: 'idle',           // idle | dialing | ringing | connected | wrapup
+  muted: false,
+  selectedDispo: null,
+  callStart: 0,
+  timerInt: null,
+  log: [],
+  stats: { dials: 0, connects: 0, talkSec: 0 },
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function fmt(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+function digits(p) { return (p || '').replace(/[^\d+]/g, ''); }
+
+function renderQueue() {
+  const wrap = $('contacts');
+  if (!state.contacts.length) {
+    wrap.innerHTML = '<div class="empty-queue"><p>No contacts loaded.<br>Drop in a CSV with name, company, and phone columns, or start with a sample list.</p></div>';
+    $('qTotal').textContent = '0'; $('qDone').textContent = '0';
+    $('qBar').style.width = '0%';
+    return;
+  }
+  wrap.innerHTML = '';
+  state.contacts.forEach((c, i) => {
+    const el = document.createElement('div');
+    el.className = 'ct' + (i === state.idx ? ' active' : '') + (c.done ? ' done' : '');
+    const disp = c.disposition ? DISPOSITIONS.find(d => d.id === c.disposition) : null;
+    el.innerHTML =
+      '<span class="ct-status"></span>' +
+      '<div class="ct-main"><div class="ct-name">' + esc(c.name) + '</div>' +
+      '<div class="ct-sub">' + esc(c.company || c.phone) + '</div></div>' +
+      (disp ? '<span class="ct-disp">' + disp.label + '</span>' : '');
+    el.onclick = () => { if (state.phase === 'idle') { state.idx = i; renderAll(); } };
+    wrap.appendChild(el);
+  });
+  const done = state.contacts.filter(c => c.done).length;
+  $('qTotal').textContent = state.contacts.length;
+  $('qDone').textContent = done;
+  $('qBar').style.width = (done / state.contacts.length * 100) + '%';
+}
+
+function renderContact() {
+  const c = state.contacts[state.idx];
+  if (!c) {
+    $('cName').textContent = state.contacts.length ? 'List complete' : 'Ready to dial';
+    $('cMeta').textContent = state.contacts.length ? 'Every contact has been worked' : 'Load a list to begin';
+    $('cNum').textContent = '';
+    return;
+  }
+  $('cName').textContent = c.name;
+  $('cMeta').textContent = [c.title, c.company].filter(Boolean).join(' · ') || '\u00A0';
+  $('cNum').textContent = c.phone || '';
+}
+
+function renderStats() {
+  const { dials, connects, talkSec } = state.stats;
+  $('sDials').textContent = dials;
+  $('sConnects').textContent = connects;
+  $('sRate').textContent = dials ? Math.round(connects / dials * 100) + '%' : '—';
+  $('sTalk').textContent = fmt(talkSec + liveSec());
+}
+
+function liveSec() {
+  return state.phase === 'connected' ? Math.floor((Date.now() - state.callStart) / 1000) : 0;
+}
+
+function renderCore() {
+  const labels = { idle: 'Idle', dialing: 'Dialing', ringing: 'Ringing', connected: 'On call', wrapup: 'Wrap-up' };
+  $('coreLabel').textContent = labels[state.phase];
+  if (state.phase === 'connected') $('coreTimer').textContent = fmt(liveSec());
+  else if (state.phase === 'wrapup') $('coreTimer').textContent = fmt(state.lastDuration || 0);
+  else $('coreTimer').textContent = '0:00';
+  $('coreHint').textContent =
+    state.phase === 'connected' && state.muted ? 'Muted' :
+    state.phase === 'ringing' ? 'Waiting for answer' : '';
+}
+
+function renderControls() {
+  const p = state.phase;
+  const hasContact = !!state.contacts[state.idx];
+  show('btnDial', p === 'idle'); $('btnDial').disabled = !hasContact;
+  show('btnSkip', p === 'idle'); $('btnSkip').disabled = !hasContact;
+  show('btnMute', p === 'connected' || p === 'ringing' || p === 'dialing');
+  show('btnEnd',  p === 'connected' || p === 'ringing' || p === 'dialing');
+  show('liveControls', p !== 'wrapup');
+  show('wrapup', p === 'wrapup');
+  $('btnMute').classList.toggle('on', state.muted);
+  $('btnMute').firstChild.textContent = state.muted ? 'Unmute' : 'Mute';
+}
+
+function renderDispoGrid() {
+  const grid = $('dispoGrid');
+  grid.innerHTML = '';
+  DISPOSITIONS.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = 'dispo' + (state.selectedDispo === d.id ? ' sel' : '');
+    b.innerHTML = '<span class="swatch" style="background:' + d.color + '"></span>' +
+                  esc(d.label) + '<span class="n" style="margin-left:auto">' + (i + 1) + '</span>';
+    b.onclick = () => { state.selectedDispo = d.id; renderDispoGrid(); };
+    grid.appendChild(b);
+  });
+}
+
+function renderLog() {
+  const body = $('logBody');
+  if (!state.log.length) { body.innerHTML = '<div class="log-empty">Completed calls will appear here.</div>'; $('logCount').textContent = ''; return; }
+  body.innerHTML = '';
+  $('logCount').textContent = state.log.length + ' calls';
+  state.log.slice().reverse().forEach(e => {
+    const d = DISPOSITIONS.find(x => x.id === e.dispo);
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    row.innerHTML =
+      '<span class="log-time">' + e.time + '</span>' +
+      '<span class="log-who">' + esc(e.name) + ' <small>' + esc(e.company || '') + '</small></span>' +
+      '<span class="log-out" style="color:' + (d ? d.color : '#9AA3AF') + '">' + (d ? d.label : '') + '</span>' +
+      '<span class="log-dur">' + fmt(e.dur) + '</span>';
+    body.appendChild(row);
+  });
+}
+
+function renderAll() {
+  $('stage').dataset.state = state.phase;
+  renderQueue(); renderContact(); renderCore(); renderControls(); renderStats();
+}
+
+function show(id, on) { $(id).classList.toggle('hidden', !on); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[m])); }
+
+/* ============================================================
+   CALL FLOW
+   ============================================================ */
+phone.onRinging   = () => { if (state.phase === 'dialing') { state.phase = 'ringing'; renderAll(); } };
+phone.onConnected = () => {
+  state.phase = 'connected';
+  state.callStart = Date.now();
+  state.timerInt = setInterval(() => { renderCore(); renderStats(); }, 1000);
+  renderAll();
+};
+phone.onDisconnected = () => endCall();
+phone.onError = (msg) => { alert('Call error: ' + (msg || 'unknown')); resetToIdle(); };
+
+function dial() {
+  const c = state.contacts[state.idx];
+  if (!c || state.phase !== 'idle') return;
+  state.phase = 'dialing';
+  state.muted = false;
+  state.stats.dials++;
+  renderAll();
+  phone.dial(digits(c.phone));
+}
+
+function hangup() {
+  if (!['dialing', 'ringing', 'connected'].includes(state.phase)) return;
+  phone.hangup();           // demo fires onDisconnected synchronously
+}
+
+function endCall() {
+  const dur = liveSec();
+  if (state.timerInt) { clearInterval(state.timerInt); state.timerInt = null; }
+  if (state.phase === 'connected') state.stats.talkSec += dur;
+  state.lastDuration = dur;
+  // pre-select a sensible default disposition
+  state.selectedDispo = dur > 0 ? 'connected' : 'no-answer';
+  state.phase = 'wrapup';
+  renderDispoGrid();
+  $('notes').value = '';
+  renderAll();
+  setTimeout(() => $('notes').focus(), 50);
+}
+
+function saveAndNext() {
+  if (state.phase !== 'wrapup') return;
+  const c = state.contacts[state.idx];
+  const dispo = state.selectedDispo || 'no-answer';
+  const dd = DISPOSITIONS.find(d => d.id === dispo);
+  c.done = true;
+  c.disposition = dispo;
+  c.notes = $('notes').value.trim();
+  if (dd && dd.counts) state.stats.connects++;
+  state.log.push({
+    name: c.name, company: c.company, dispo,
+    dur: state.lastDuration || 0,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+  state.selectedDispo = null;
+  state.lastDuration = 0;
+  advance();
+  resetToIdle();
+  renderLog();
+}
+
+function advance() {
+  // move to the next not-done contact
+  let next = -1;
+  for (let i = state.idx + 1; i < state.contacts.length; i++) if (!state.contacts[i].done) { next = i; break; }
+  if (next === -1) for (let i = 0; i < state.contacts.length; i++) if (!state.contacts[i].done) { next = i; break; }
+  state.idx = next;
+}
+
+function skip() {
+  if (state.phase !== 'idle') return;
+  advance(); renderAll();
+}
+
+function resetToIdle() { state.phase = 'idle'; state.muted = false; renderAll(); }
+
+function toggleMute() {
+  if (!['dialing', 'ringing', 'connected'].includes(state.phase)) return;
+  state.muted = !state.muted;
+  phone.setMute(state.muted);
+  renderControls(); renderCore();
+}
+
+/* ============================================================
+   CSV / DATA
+   ============================================================ */
+function loadRows(rows) {
+  const pick = (obj, keys) => {
+    for (const k of Object.keys(obj)) if (keys.some(t => k.toLowerCase().trim().includes(t))) return obj[k];
+    return '';
+  };
+  const contacts = rows.map(r => {
+    const first = pick(r, ['first']);
+    const last  = pick(r, ['last']);
+    const name  = pick(r, ['full name', 'name']) || [first, last].filter(Boolean).join(' ') || 'Unknown';
+    return {
+      name: String(name).trim(),
+      company: String(pick(r, ['company', 'org', 'account']) || '').trim(),
+      title: String(pick(r, ['title', 'role', 'position']) || '').trim(),
+      phone: String(pick(r, ['phone', 'mobile', 'number', 'tel', 'cell']) || '').trim(),
+      done: false, disposition: null, notes: '',
+    };
+  }).filter(c => c.phone);
+  if (!contacts.length) { alert('No rows with a usable phone number were found. Check that your CSV has a phone column.'); return; }
+  state.contacts = contacts;
+  state.idx = 0;
+  state.log = [];
+  state.stats = { dials: 0, connects: 0, talkSec: 0 };
+  resetToIdle(); renderLog();
+}
+
+function sampleList() {
+  loadRows([
+    { name: 'Dana Whitfield', company: 'Northgate Auto Group', title: 'General Manager', phone: '+1 415 555 0143' },
+    { name: 'Marcus Reyes',   company: 'Coastline Insurance',  title: 'Agency Owner',    phone: '+1 415 555 0177' },
+    { name: 'Priya Nadar',    company: 'Summit Motors',        title: 'F&I Manager',     phone: '+1 628 555 0192' },
+    { name: 'Tom Becker',     company: 'Becker Realty',        title: 'Principal',       phone: '+1 510 555 0108' },
+    { name: 'Lena Ortiz',     company: 'Brightway Agency',     title: 'Sales Lead',      phone: '+1 408 555 0166' },
+    { name: 'Sam Cho',        company: 'Valley Ford',          title: 'Floor Manager',   phone: '+1 669 555 0121' },
+  ]);
+}
+
+/* ============================================================
+   EVENTS
+   ============================================================ */
+$('btnDial').onclick = dial;
+$('btnEnd').onclick = hangup;
+$('btnMute').onclick = toggleMute;
+$('btnSkip').onclick = skip;
+$('btnSaveNext').onclick = saveAndNext;
+$('btnSample').onclick = sampleList;
+$('btnUpload').onclick = () => $('fileInput').click();
+$('fileInput').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  Papa.parse(f, { header: true, skipEmptyLines: true, complete: (res) => loadRows(res.data) });
+  e.target.value = '';
+};
+
+// drag & drop CSV anywhere
+['dragover', 'drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+document.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f && /\.csv$/i.test(f.name)) Papa.parse(f, { header: true, skipEmptyLines: true, complete: (res) => loadRows(res.data) });
+});
+
+// keyboard hotkeys
+document.addEventListener('keydown', (e) => {
+  const typing = document.activeElement && document.activeElement.tagName === 'TEXTAREA';
+  if (e.key === 'Enter' && state.phase === 'wrapup') { e.preventDefault(); saveAndNext(); return; }
+  if (typing) return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (state.phase === 'idle') dial();
+    else if (['dialing','ringing','connected'].includes(state.phase)) hangup();
+  } else if (e.key === 'm') { toggleMute(); }
+  else if (e.key === 's' && state.phase === 'idle') { skip(); }
+  else if (state.phase === 'wrapup' && /^[1-6]$/.test(e.key)) {
+    state.selectedDispo = DISPOSITIONS[+e.key - 1].id; renderDispoGrid();
+  }
+});
+
+renderAll();
+</script>
+</body>
+</html>
