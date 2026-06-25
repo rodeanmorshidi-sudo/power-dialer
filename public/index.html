@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Power Dialer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<!-- TO GO LIVE, uncomment these two lines:
 <script src="https://sdk.twilio.com/js/voice/releases/2.12.3/twilio.min.js"></script>
 <script src="twilio-telephony.js"></script>
--->
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
@@ -372,7 +370,7 @@
     <div class="brand">
       <span class="brand-dot"></span>
       <h1>Power Dialer</h1>
-      <span class="mode" id="modeBadge">Demo</span>
+      <span class="mode" id="modeBadge">Live</span>
     </div>
     <div class="stats">
       <div class="stat"><div class="k">Dials</div><div class="v" id="sDials">0</div></div>
@@ -485,8 +483,8 @@ function DemoTelephony() {
    (2) comment out the DemoTelephony line, (3) uncomment the
    TwilioTelephony line. backendUrl:'' means "same site that served
    this page", which is correct when server.js serves it. */
-const phone = DemoTelephony();
-// const phone = TwilioTelephony({ backendUrl: '', agent: 'dean' });
+// const phone = DemoTelephony();
+const phone = TwilioTelephony({ backendUrl: '', agent: 'dean' });
 
 /* ============================================================
    STATE
