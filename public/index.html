@@ -434,6 +434,8 @@
         <div class="wrapup hidden" id="wrapup">
           <h3>Disposition</h3>
           <div class="dispo-grid" id="dispoGrid"></div>
+          <h3>Lead status</h3>
+          <div class="dispo-grid" id="leadStatusGrid"></div>
           <textarea id="notes" placeholder="Notes (optional)"></textarea>
           <div class="wrapup-actions">
             <button class="btn btn-dial" id="btnSaveNext">Save &amp; next<span class="kbd">enter</span></button>
@@ -483,8 +485,9 @@ function DemoTelephony() {
    (2) comment out the DemoTelephony line, (3) uncomment the
    TwilioTelephony line. backendUrl:'' means "same site that served
    this page", which is correct when server.js serves it. */
+const AGENT_NAME = 'dean'; // change per rep (e.g. 'valentinos') when deploying their instance
 // const phone = DemoTelephony();
-const phone = TwilioTelephony({ backendUrl: '', agent: 'dean' });
+const phone = TwilioTelephony({ backendUrl: '', agent: AGENT_NAME });
 
 /* ============================================================
    STATE
@@ -498,12 +501,23 @@ const DISPOSITIONS = [
   { id: 'dnc',        label: 'Do not call',  color: '#E0654E', counts: false },
 ];
 
+// Lead status: what to do with this lead going forward (separate from the
+// disposition above, which just records what happened on THIS call).
+// Backed by the leads table in Postgres via /api/leads.
+const LEAD_STATUSES = [
+  { id: 'call_again',  label: 'Call again',        color: '#6E9BF0' },
+  { id: 'do_not_call', label: "Don't call again",  color: '#E0654E' },
+  { id: 'booked',      label: 'Booked',            color: '#3DBE8B' },
+];
+const BACKEND_URL = ''; // same origin as this page
+
 const state = {
   contacts: [],
   idx: -1,
   phase: 'idle',           // idle | dialing | ringing | connected | wrapup
   muted: false,
   selectedDispo: null,
+  selectedLeadStatus: null,
   callStart: 0,
   timerInt: null,
   log: [],
@@ -610,6 +624,18 @@ function renderDispoGrid() {
   });
 }
 
+function renderLeadStatusGrid() {
+  const grid = $('leadStatusGrid');
+  grid.innerHTML = '';
+  LEAD_STATUSES.forEach((s) => {
+    const b = document.createElement('button');
+    b.className = 'dispo' + (state.selectedLeadStatus === s.id ? ' sel' : '');
+    b.innerHTML = '<span class="swatch" style="background:' + s.color + '"></span>' + esc(s.label);
+    b.onclick = () => { state.selectedLeadStatus = s.id; renderLeadStatusGrid(); };
+    grid.appendChild(b);
+  });
+}
+
 function renderLog() {
   const body = $('logBody');
   if (!state.log.length) { body.innerHTML = '<div class="log-empty">Completed calls will appear here.</div>'; $('logCount').textContent = ''; return; }
@@ -671,32 +697,69 @@ function endCall() {
   state.lastDuration = dur;
   // pre-select a sensible default disposition
   state.selectedDispo = dur > 0 ? 'connected' : 'no-answer';
+  // pre-select a sensible default lead status from that disposition; rep can
+  // override (e.g. pick "Booked" manually, since nothing infers that for you)
+  state.selectedLeadStatus = DEFAULT_LEAD_STATUS[state.selectedDispo] || 'call_again';
   state.phase = 'wrapup';
   renderDispoGrid();
+  renderLeadStatusGrid();
   $('notes').value = '';
   renderAll();
   setTimeout(() => $('notes').focus(), 50);
 }
 
+// What "call again / don't call / booked" defaults to based on how the
+// call went, before the rep overrides it.
+const DEFAULT_LEAD_STATUS = {
+  connected: 'call_again',
+  voicemail: 'call_again',
+  'no-answer': 'call_again',
+  callback: 'call_again',
+  'wrong-num': 'do_not_call',
+  dnc: 'do_not_call',
+};
+
 function saveAndNext() {
   if (state.phase !== 'wrapup') return;
   const c = state.contacts[state.idx];
   const dispo = state.selectedDispo || 'no-answer';
+  const leadStatus = state.selectedLeadStatus || 'call_again';
+  const notes = $('notes').value.trim();
   const dd = DISPOSITIONS.find(d => d.id === dispo);
   c.done = true;
   c.disposition = dispo;
-  c.notes = $('notes').value.trim();
+  c.status = leadStatus;
+  c.notes = notes;
   if (dd && dd.counts) state.stats.connects++;
   state.log.push({
-    name: c.name, company: c.company, dispo,
+    name: c.name, company: c.company, dispo, leadStatus,
     dur: state.lastDuration || 0,
     time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   });
   state.selectedDispo = null;
+  state.selectedLeadStatus = null;
   state.lastDuration = 0;
+  saveLeadToServer(c, dispo, notes, leadStatus);
   advance();
   resetToIdle();
   renderLog();
+}
+
+// Push the call outcome to the CRM (leads table). Fire-and-forget from the
+// UI's perspective — if it fails, the call still moves on and the lead just
+// won't show the update to other reps until it succeeds. Errors are logged.
+async function saveLeadToServer(contact, disposition, notes, status) {
+  if (!contact.id) return; // lead isn't backed by the DB (e.g. offline demo list)
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/leads/${contact.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disposition, notes, status, agent: AGENT_NAME }),
+    });
+    if (!r.ok) throw new Error(`status ${r.status}`);
+  } catch (e) {
+    console.error('Failed to save lead update to server', e);
+  }
 }
 
 function advance() {
@@ -724,7 +787,24 @@ function toggleMute() {
 /* ============================================================
    CSV / DATA
    ============================================================ */
-function loadRows(rows) {
+// Converts a DB lead row (snake_case, from /api/leads) into the shape the
+// UI works with. Leads already resolved (do_not_call / booked) are marked
+// done so advance() naturally skips them in the dial queue.
+function leadToContact(l) {
+  return {
+    id: l.id,
+    name: l.name || 'Unknown',
+    company: l.company || '',
+    title: l.title || '',
+    phone: l.phone,
+    status: l.status,
+    disposition: l.last_disposition,
+    notes: l.notes || '',
+    done: l.status !== 'call_again',
+  };
+}
+
+async function loadRows(rows) {
   const pick = (obj, keys) => {
     for (const k of Object.keys(obj)) if (keys.some(t => k.toLowerCase().trim().includes(t))) return obj[k];
     return '';
@@ -738,15 +818,50 @@ function loadRows(rows) {
       company: String(pick(r, ['company', 'org', 'account']) || '').trim(),
       title: String(pick(r, ['title', 'role', 'position']) || '').trim(),
       phone: String(pick(r, ['phone', 'mobile', 'number', 'tel', 'cell']) || '').trim(),
-      done: false, disposition: null, notes: '',
     };
   }).filter(c => c.phone);
   if (!contacts.length) { alert('No rows with a usable phone number were found. Check that your CSV has a phone column.'); return; }
-  state.contacts = contacts;
-  state.idx = 0;
+
   state.log = [];
   state.stats = { dials: 0, connects: 0, talkSec: 0 };
+
+  try {
+    // Upsert into the leads DB (matched by phone) — existing history for
+    // people already in the CRM is preserved, not overwritten.
+    const r = await fetch(`${BACKEND_URL}/api/leads/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contacts }),
+    });
+    if (!r.ok) throw new Error(`import failed: ${r.status}`);
+    const { leads } = await r.json();
+    state.contacts = leads.map(leadToContact);
+  } catch (e) {
+    console.error('Could not reach the leads database, working this list locally only', e);
+    alert("Couldn't save this list to the CRM database (working offline for this session — statuses won't be shared or saved). Check DATABASE_URL on the server.");
+    state.contacts = contacts.map(c => ({ ...c, done: false, disposition: null, notes: '' }));
+  }
+
+  state.idx = state.contacts.findIndex(c => !c.done);
+  if (state.idx === -1) state.idx = 0;
   resetToIdle(); renderLog();
+}
+
+// Pull whatever's already in the CRM on page load, so a rep opening the
+// dialer fresh sees the live shared queue, not an empty screen.
+async function loadLeadsFromServer() {
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/leads`);
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    const { leads } = await r.json();
+    if (!leads.length) return; // nothing imported yet — wait for CSV/sample
+    state.contacts = leads.map(leadToContact);
+    state.idx = state.contacts.findIndex(c => !c.done);
+    if (state.idx === -1) state.idx = 0;
+    resetToIdle(); renderLog();
+  } catch (e) {
+    console.error('Could not load leads from server on startup', e);
+  }
 }
 
 function sampleList() {
@@ -800,6 +915,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 renderAll();
+loadLeadsFromServer();
 </script>
 </body>
 </html>
