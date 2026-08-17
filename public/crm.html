@@ -40,7 +40,7 @@
   header a { color: var(--text-dim); text-decoration: none; font-size: 13px; border: 1px solid var(--line); padding: 7px 12px; border-radius: var(--r-s); }
   header a:hover { border-color: var(--accent); color: var(--text); }
 
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
   .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; }
   .stat .n { font-family: var(--mono); font-size: 22px; font-weight: 700; }
   .stat .l { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
@@ -64,6 +64,10 @@
     color: var(--text); cursor: pointer;
   }
   .btn:hover { border-color: var(--accent); }
+  .btn-danger { color: var(--end); }
+  .btn-danger:hover { border-color: var(--end); background: rgba(224,101,78,0.1); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--line); background: var(--panel); }
 
   table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); }
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
@@ -82,6 +86,7 @@
   select.status-pill.call_again  { background: rgba(110,155,240,0.14); color: var(--accent); border-color: rgba(110,155,240,0.4); }
   select.status-pill.do_not_call { background: rgba(224,101,78,0.14); color: var(--end); border-color: rgba(224,101,78,0.4); }
   select.status-pill.booked      { background: rgba(61,190,139,0.14); color: var(--live); border-color: rgba(61,190,139,0.4); }
+  select.status-pill.exhausted   { background: rgba(107,114,128,0.18); color: var(--text-dim); border-color: rgba(107,114,128,0.4); }
 
   .notes-cell textarea {
     width: 100%; min-width: 180px; background: transparent; border: 1px solid transparent;
@@ -108,6 +113,7 @@
   <div class="toolbar">
     <div class="tabs" id="tabs"></div>
     <input type="search" id="search" placeholder="Search name, company, phone…" />
+    <button class="btn btn-danger" id="btnDeleteSelected" disabled>Delete selected (0)</button>
     <button class="btn" id="btnRefresh">Refresh</button>
   </div>
 
@@ -119,15 +125,18 @@ const STATUSES = [
   { id: 'call_again',  label: 'Call again' },
   { id: 'do_not_call',  label: "Don't call again" },
   { id: 'booked',      label: 'Booked' },
+  { id: 'exhausted',   label: 'Exhausted (3 tries)' },
 ];
 let allLeads = [];
 let activeTab = 'all';
+let selectedIds = new Set();
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 
 async function loadLeads() {
   $('tableWrap').innerHTML = '<div class="empty">Loading…</div>';
+  selectedIds.clear();
   try {
     const r = await fetch('/api/leads');
     if (!r.ok) throw new Error('status ' + r.status);
@@ -143,13 +152,14 @@ async function loadLeads() {
 }
 
 function renderStats() {
-  const counts = { all: allLeads.length, call_again: 0, do_not_call: 0, booked: 0 };
+  const counts = { all: allLeads.length, call_again: 0, do_not_call: 0, booked: 0, exhausted: 0 };
   allLeads.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
   $('stats').innerHTML = `
     <div class="stat"><div class="n">${counts.all}</div><div class="l">Total leads</div></div>
     <div class="stat"><div class="n">${counts.call_again}</div><div class="l">Call again</div></div>
     <div class="stat"><div class="n">${counts.booked}</div><div class="l">Booked</div></div>
     <div class="stat"><div class="n">${counts.do_not_call}</div><div class="l">Do not call</div></div>
+    <div class="stat"><div class="n">${counts.exhausted}</div><div class="l">Exhausted (3 tries)</div></div>
   `;
 }
 
@@ -180,10 +190,12 @@ function renderTable() {
     $('tableWrap').innerHTML = allLeads.length
       ? '<div class="empty">No leads match this filter.</div>'
       : '<div class="empty">No leads yet — load a CSV in <a href="/">the dialer</a> to get started.</div>';
+    updateDeleteButton();
     return;
   }
   const rows = leads.map(l => `
     <tr data-id="${l.id}">
+      <td><input type="checkbox" class="row-check" data-id="${l.id}" ${selectedIds.has(l.id) ? 'checked' : ''} /></td>
       <td>
         <div class="name">${esc(l.name || 'Unknown')}</div>
         <div class="company">${esc(l.company || '')}${l.title ? ' · ' + esc(l.title) : ''}</div>
@@ -195,12 +207,14 @@ function renderTable() {
         </select>
       </td>
       <td class="meta">${esc(l.last_disposition || '—')}</td>
+      <td class="meta">${l.attempts || 0}/3</td>
       <td class="notes-cell">
         <textarea data-field="notes" placeholder="Notes…">${esc(l.notes || '')}</textarea>
         <span class="saved-flash">Saved</span>
       </td>
       <td class="meta">${l.call_count || 0}</td>
       <td class="meta">${esc(l.agent || '—')}</td>
+      <td class="meta">${l.last_called_at ? new Date(l.last_called_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</td>
       <td class="meta">${l.updated_at ? new Date(l.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
     </tr>
   `).join('');
@@ -208,7 +222,8 @@ function renderTable() {
   $('tableWrap').innerHTML = `
     <table>
       <thead><tr>
-        <th>Lead</th><th>Phone</th><th>Status</th><th>Last call</th><th>Notes</th><th>Calls</th><th>Agent</th><th>Updated</th>
+        <th><input type="checkbox" id="checkAll" /></th>
+        <th>Lead</th><th>Phone</th><th>Status</th><th>Last call</th><th>Attempts</th><th>Notes</th><th>Calls</th><th>Agent</th><th>Last dialed</th><th>Updated</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -220,13 +235,57 @@ function renderTable() {
     const statusEl = tr.querySelector('[data-field="status"]');
     const notesEl = tr.querySelector('[data-field="notes"]');
     const flash = tr.querySelector('.saved-flash');
+    const checkEl = tr.querySelector('.row-check');
 
     statusEl.onchange = () => {
       statusEl.className = 'status-pill ' + statusEl.value;
       saveLead(id, { status: statusEl.value }, flash);
     };
     notesEl.onblur = () => saveLead(id, { notes: notesEl.value }, flash);
+    checkEl.onchange = () => {
+      const numId = Number(id);
+      if (checkEl.checked) selectedIds.add(numId); else selectedIds.delete(numId);
+      updateDeleteButton();
+    };
   });
+
+  const checkAll = $('checkAll');
+  const visibleIds = leads.map(l => l.id);
+  checkAll.checked = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+  checkAll.onchange = () => {
+    visibleIds.forEach(id => checkAll.checked ? selectedIds.add(id) : selectedIds.delete(id));
+    renderTable();
+  };
+
+  updateDeleteButton();
+}
+
+function updateDeleteButton() {
+  const btn = $('btnDeleteSelected');
+  btn.textContent = `Delete selected (${selectedIds.size})`;
+  btn.disabled = selectedIds.size === 0;
+}
+
+async function deleteSelected() {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const ok = confirm(`Permanently delete ${ids.length} lead${ids.length > 1 ? 's' : ''}? This can't be undone — use it for test/sample data, not real leads you want to keep a record of.`);
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/leads', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    if (!r.ok) throw new Error('status ' + r.status);
+    allLeads = allLeads.filter(l => !selectedIds.has(l.id));
+    selectedIds.clear();
+    renderStats();
+    renderTable();
+  } catch (e) {
+    console.error('bulk delete failed', e);
+    alert('Could not delete those leads — check your connection and try again.');
+  }
 }
 
 async function saveLead(id, patch, flashEl) {
@@ -253,6 +312,7 @@ async function saveLead(id, patch, flashEl) {
 
 $('search').addEventListener('input', renderTable);
 $('btnRefresh').onclick = loadLeads;
+$('btnDeleteSelected').onclick = deleteSelected;
 
 loadLeads();
 </script>
