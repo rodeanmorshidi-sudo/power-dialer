@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leads — Power Dialer CRM</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  :root {
+    --ink:        #14171D;
+    --panel:      #1B1F27;
+    --panel-2:    #21262F;
+    --line:       #2C323D;
+    --text:       #E8EAED;
+    --text-dim:   #9AA3AF;
+    --text-faint: #6B7280;
+
+    --live:       #3DBE8B;
+    --ring:       #E0A33E;
+    --end:        #E0654E;
+    --accent:     #6E9BF0;
+
+    --r:   10px;
+    --r-s: 7px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --disp: 'Space Grotesk', system-ui, sans-serif;
+    --body: 'Inter', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink); color: var(--text); font-family: var(--body);
+    font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
+  h1 { font-family: var(--disp); font-size: 22px; font-weight: 700; }
+  header a { color: var(--text-dim); text-decoration: none; font-size: 13px; border: 1px solid var(--line); padding: 7px 12px; border-radius: var(--r-s); }
+  header a:hover { border-color: var(--accent); color: var(--text); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; }
+  .stat .n { font-family: var(--mono); font-size: 22px; font-weight: 700; }
+  .stat .l { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .tabs { display: flex; gap: 6px; }
+  .tab {
+    font-family: var(--body); font-size: 13px; font-weight: 500;
+    padding: 7px 13px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text-dim); cursor: pointer;
+  }
+  .tab.sel { border-color: var(--accent); color: var(--text); background: rgba(110,155,240,0.12); }
+  input[type="search"] {
+    flex: 1; min-width: 180px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-s); padding: 8px 12px; color: var(--text); font-family: var(--body); font-size: 13px;
+  }
+  input[type="search"]:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    font-family: var(--body); font-size: 13px; font-weight: 500; padding: 8px 14px;
+    border-radius: var(--r-s); border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.015); }
+  .name { font-weight: 600; }
+  .company, .phone { color: var(--text-dim); font-size: 12px; }
+  .phone { font-family: var(--mono); }
+
+  select.status-pill {
+    font-family: var(--body); font-size: 12px; font-weight: 600; padding: 5px 8px;
+    border-radius: 999px; border: 1px solid var(--line); cursor: pointer; appearance: none;
+    -webkit-appearance: none;
+  }
+  select.status-pill.call_again  { background: rgba(110,155,240,0.14); color: var(--accent); border-color: rgba(110,155,240,0.4); }
+  select.status-pill.do_not_call { background: rgba(224,101,78,0.14); color: var(--end); border-color: rgba(224,101,78,0.4); }
+  select.status-pill.booked      { background: rgba(61,190,139,0.14); color: var(--live); border-color: rgba(61,190,139,0.4); }
+
+  .notes-cell textarea {
+    width: 100%; min-width: 180px; background: transparent; border: 1px solid transparent;
+    border-radius: 5px; color: var(--text); font-family: var(--body); font-size: 12px;
+    resize: vertical; min-height: 32px; padding: 4px 6px;
+  }
+  .notes-cell textarea:hover, .notes-cell textarea:focus { border-color: var(--line); background: var(--panel-2); outline: none; }
+  .meta { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+  .saved-flash { color: var(--live); font-size: 11px; margin-left: 6px; opacity: 0; transition: opacity .2s; }
+  .saved-flash.show { opacity: 1; }
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-faint); }
+  .empty a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Leads</h1>
+    <a href="/">&larr; Back to dialer</a>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="toolbar">
+    <div class="tabs" id="tabs"></div>
+    <input type="search" id="search" placeholder="Search name, company, phone…" />
+    <button class="btn" id="btnRefresh">Refresh</button>
+  </div>
+
+  <div id="tableWrap"></div>
+</div>
+
+<script>
+const STATUSES = [
+  { id: 'call_again',  label: 'Call again' },
+  { id: 'do_not_call',  label: "Don't call again" },
+  { id: 'booked',      label: 'Booked' },
+];
+let allLeads = [];
+let activeTab = 'all';
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+async function loadLeads() {
+  $('tableWrap').innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/leads');
+    if (!r.ok) throw new Error('status ' + r.status);
+    const { leads } = await r.json();
+    allLeads = leads;
+    renderStats();
+    renderTabs();
+    renderTable();
+  } catch (e) {
+    console.error(e);
+    $('tableWrap').innerHTML = '<div class="empty">Could not load leads from the server. Check that DATABASE_URL is set and the service redeployed.</div>';
+  }
+}
+
+function renderStats() {
+  const counts = { all: allLeads.length, call_again: 0, do_not_call: 0, booked: 0 };
+  allLeads.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+  $('stats').innerHTML = `
+    <div class="stat"><div class="n">${counts.all}</div><div class="l">Total leads</div></div>
+    <div class="stat"><div class="n">${counts.call_again}</div><div class="l">Call again</div></div>
+    <div class="stat"><div class="n">${counts.booked}</div><div class="l">Booked</div></div>
+    <div class="stat"><div class="n">${counts.do_not_call}</div><div class="l">Do not call</div></div>
+  `;
+}
+
+function renderTabs() {
+  const tabs = [{ id: 'all', label: 'All' }, ...STATUSES];
+  $('tabs').innerHTML = '';
+  tabs.forEach(t => {
+    const b = document.createElement('button');
+    b.className = 'tab' + (activeTab === t.id ? ' sel' : '');
+    b.textContent = t.label;
+    b.onclick = () => { activeTab = t.id; renderTabs(); renderTable(); };
+    $('tabs').appendChild(b);
+  });
+}
+
+function filteredLeads() {
+  const q = $('search').value.trim().toLowerCase();
+  return allLeads.filter(l => {
+    if (activeTab !== 'all' && l.status !== activeTab) return false;
+    if (!q) return true;
+    return [l.name, l.company, l.phone, l.title].some(f => (f || '').toLowerCase().includes(q));
+  });
+}
+
+function renderTable() {
+  const leads = filteredLeads();
+  if (!leads.length) {
+    $('tableWrap').innerHTML = allLeads.length
+      ? '<div class="empty">No leads match this filter.</div>'
+      : '<div class="empty">No leads yet — load a CSV in <a href="/">the dialer</a> to get started.</div>';
+    return;
+  }
+  const rows = leads.map(l => `
+    <tr data-id="${l.id}">
+      <td>
+        <div class="name">${esc(l.name || 'Unknown')}</div>
+        <div class="company">${esc(l.company || '')}${l.title ? ' · ' + esc(l.title) : ''}</div>
+      </td>
+      <td class="phone">${esc(l.phone)}</td>
+      <td>
+        <select class="status-pill ${l.status}" data-field="status">
+          ${STATUSES.map(s => `<option value="${s.id}" ${s.id === l.status ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+      </td>
+      <td class="meta">${esc(l.last_disposition || '—')}</td>
+      <td class="notes-cell">
+        <textarea data-field="notes" placeholder="Notes…">${esc(l.notes || '')}</textarea>
+        <span class="saved-flash">Saved</span>
+      </td>
+      <td class="meta">${l.call_count || 0}</td>
+      <td class="meta">${esc(l.agent || '—')}</td>
+      <td class="meta">${l.updated_at ? new Date(l.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+    </tr>
+  `).join('');
+
+  $('tableWrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Lead</th><th>Phone</th><th>Status</th><th>Last call</th><th>Notes</th><th>Calls</th><th>Agent</th><th>Updated</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  // wire up inline editing — status saves immediately, notes save on blur
+  $('tableWrap').querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = tr.dataset.id;
+    const statusEl = tr.querySelector('[data-field="status"]');
+    const notesEl = tr.querySelector('[data-field="notes"]');
+    const flash = tr.querySelector('.saved-flash');
+
+    statusEl.onchange = () => {
+      statusEl.className = 'status-pill ' + statusEl.value;
+      saveLead(id, { status: statusEl.value }, flash);
+    };
+    notesEl.onblur = () => saveLead(id, { notes: notesEl.value }, flash);
+  });
+}
+
+async function saveLead(id, patch, flashEl) {
+  try {
+    const r = await fetch(`/api/leads/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!r.ok) throw new Error('status ' + r.status);
+    const { lead } = await r.json();
+    const idx = allLeads.findIndex(l => l.id === lead.id);
+    if (idx !== -1) allLeads[idx] = lead;
+    if (flashEl) {
+      flashEl.classList.add('show');
+      setTimeout(() => flashEl.classList.remove('show'), 1200);
+    }
+    renderStats();
+  } catch (e) {
+    console.error('save failed', e);
+    alert('Could not save that change — check your connection and try again.');
+  }
+}
+
+$('search').addEventListener('input', renderTable);
+$('btnRefresh').onclick = loadLeads;
+
+loadLeads();
+</script>
+</body>
+</html>
