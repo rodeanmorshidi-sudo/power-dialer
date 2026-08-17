@@ -377,9 +377,36 @@
     .stats { gap: 16px; }
     .stat .v { font-size: 16px; }
   }
+
+  /* Agent gate — asks "who's calling" once per browser so the CRM's Agent
+     column is accurate now that more than one person shares this app. */
+  #agentGate {
+    position: fixed; inset: 0; background: var(--ink); z-index: 999;
+    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+  }
+  #agentGate.hidden { display: none; }
+  #agentGate h2 { font-family: var(--disp); font-size: 20px; }
+  #agentGate p { color: var(--text-dim); font-size: 13px; max-width: 280px; text-align: center; }
+  .agent-options { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .agent-btn {
+    font-family: var(--disp); font-size: 15px; font-weight: 600; padding: 14px 24px;
+    border-radius: var(--r-s); border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); cursor: pointer;
+  }
+  .agent-btn:hover { border-color: var(--accent); background: var(--panel-2); }
+  .agent-btn.other { font-family: var(--body); font-size: 13px; font-weight: 500; color: var(--text-dim); }
 </style>
 </head>
 <body>
+<div id="agentGate" class="hidden">
+  <h2>Who's calling?</h2>
+  <p>Picked once per browser — used to attribute calls and lead updates in the CRM.</p>
+  <div class="agent-options">
+    <button class="agent-btn" data-agent="dean">Dean</button>
+    <button class="agent-btn" data-agent="valentinos">Valentinos</button>
+  </div>
+  <button class="agent-btn other" data-agent="other">Just uploading a list — not calling</button>
+</div>
 <div class="app">
   <header>
     <div class="brand">
@@ -393,6 +420,7 @@
       <div class="stat"><div class="k">Connect rate</div><div class="v" id="sRate">—</div></div>
       <div class="stat"><div class="k">Talk time</div><div class="v" id="sTalk">0:00</div></div>
       <a href="/crm.html" style="align-self:center;color:var(--text-dim);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 12px;border-radius:var(--r-s);">Leads →</a>
+      <a href="#" id="switchAgent" style="align-self:center;color:var(--text-faint);text-decoration:none;font-size:12px;padding:7px 4px;">Switch user</a>
     </div>
   </header>
 
@@ -507,7 +535,7 @@ function DemoTelephony() {
    (2) comment out the DemoTelephony line, (3) uncomment the
    TwilioTelephony line. backendUrl:'' means "same site that served
    this page", which is correct when server.js serves it. */
-const AGENT_NAME = 'dean'; // change per rep (e.g. 'valentinos') when deploying their instance
+const AGENT_NAME = localStorage.getItem('pd_agent') || 'unassigned';
 // const phone = DemoTelephony();
 const phone = TwilioTelephony({ backendUrl: '', agent: AGENT_NAME });
 
@@ -823,8 +851,19 @@ function toggleMute() {
    CSV / DATA
    ============================================================ */
 // Converts a DB lead row (snake_case, from /api/leads) into the shape the
-// UI works with. Leads already resolved (do_not_call / booked) are marked
-// done so advance() naturally skips them in the dial queue.
+// UI works with. Leads already resolved (do_not_call / booked / exhausted)
+// are marked done so advance() naturally skips them. A lead already dialed
+// today is also hidden until tomorrow, even if it's still call_again —
+// avoids re-dialing the same person twice in one shift.
+function calledToday(lastCalledAt) {
+  if (!lastCalledAt) return false;
+  const d = new Date(lastCalledAt);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() &&
+         d.getMonth() === now.getMonth() &&
+         d.getDate() === now.getDate();
+}
+
 function leadToContact(l) {
   return {
     id: l.id,
@@ -835,7 +874,9 @@ function leadToContact(l) {
     status: l.status,
     disposition: l.last_disposition,
     notes: l.notes || '',
-    done: l.status !== 'call_again',
+    attempts: l.attempts || 0,
+    lastCalledAt: l.last_called_at,
+    done: l.status !== 'call_again' || calledToday(l.last_called_at),
   };
 }
 
@@ -951,7 +992,28 @@ document.addEventListener('keydown', (e) => {
 
 renderKeypad();
 renderAll();
-loadLeadsFromServer();
+
+$('switchAgent').onclick = (e) => {
+  e.preventDefault();
+  localStorage.removeItem('pd_agent');
+  location.reload();
+};
+
+// Show the "who's calling" gate if this browser hasn't picked an agent yet.
+// Picking one reloads the page so the Twilio device (and every save from
+// here on) is tagged correctly — simpler and more reliable than trying to
+// swap identities on an already-registered device mid-session.
+if (AGENT_NAME === 'unassigned') {
+  $('agentGate').classList.remove('hidden');
+  $('agentGate').querySelectorAll('[data-agent]').forEach(btn => {
+    btn.onclick = () => {
+      localStorage.setItem('pd_agent', btn.dataset.agent);
+      location.reload();
+    };
+  });
+} else {
+  loadLeadsFromServer();
+}
 </script>
 </body>
 </html>
