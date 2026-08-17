@@ -307,6 +307,21 @@
   }
   .dispo .swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
 
+  .keypad { padding: 14px 0; }
+  .keypad-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    max-width: 260px;
+  }
+  .keypad-key {
+    font-family: var(--mono); font-size: 18px; font-weight: 600;
+    padding: 14px 0; border-radius: var(--r-s);
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); cursor: pointer; text-align: center;
+    transition: border-color .12s, background .12s, transform .08s;
+  }
+  .keypad-key:hover { background: var(--panel-2); }
+  .keypad-key:active { transform: scale(0.95); background: rgba(110,155,240,0.15); }
+
   textarea {
     width: 100%; resize: none; background: var(--panel);
     border: 1px solid var(--line); border-radius: var(--r-s);
@@ -377,6 +392,7 @@
       <div class="stat"><div class="k">Connects</div><div class="v good" id="sConnects">0</div></div>
       <div class="stat"><div class="k">Connect rate</div><div class="v" id="sRate">—</div></div>
       <div class="stat"><div class="k">Talk time</div><div class="v" id="sTalk">0:00</div></div>
+      <a href="/crm.html" style="align-self:center;color:var(--text-dim);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 12px;border-radius:var(--r-s);">Leads →</a>
     </div>
   </header>
 
@@ -428,6 +444,12 @@
           <button class="btn btn-ghost" id="btnSkip" disabled>Skip<span class="kbd">s</span></button>
           <button class="btn btn-mute hidden" id="btnMute">Mute<span class="kbd">m</span></button>
           <button class="btn btn-end hidden" id="btnEnd">Hang up<span class="kbd">space</span></button>
+        </div>
+
+        <!-- DTMF keypad — only usable once a call is actually connected -->
+        <div class="keypad hidden" id="keypad">
+          <div class="hint" style="margin-bottom:8px;opacity:.7">Send touch-tones (IVR menus, "press 1 for...")</div>
+          <div class="keypad-grid" id="keypadGrid"></div>
         </div>
 
         <!-- wrap-up -->
@@ -606,9 +628,22 @@ function renderControls() {
   show('btnMute', p === 'connected' || p === 'ringing' || p === 'dialing');
   show('btnEnd',  p === 'connected' || p === 'ringing' || p === 'dialing');
   show('liveControls', p !== 'wrapup');
+  show('keypad', p === 'connected'); // only usable once the call is actually live
   show('wrapup', p === 'wrapup');
   $('btnMute').classList.toggle('on', state.muted);
   $('btnMute').firstChild.textContent = state.muted ? 'Unmute' : 'Mute';
+}
+
+function renderKeypad() {
+  const grid = $('keypadGrid');
+  if (grid.childElementCount) return; // build once, it's static
+  ['1','2','3','4','5','6','7','8','9','*','0','#'].forEach(key => {
+    const b = document.createElement('button');
+    b.className = 'keypad-key';
+    b.textContent = key;
+    b.onclick = () => phone.sendDigits(key);
+    grid.appendChild(b);
+  });
 }
 
 function renderDispoGrid() {
@@ -914,6 +949,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+renderKeypad();
 renderAll();
 loadLeadsFromServer();
 </script>
