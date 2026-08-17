@@ -16,7 +16,7 @@ const express = require('express');
 const cors = require('cors');
 const twilio = require('twilio');
 const db = require('./db');
- 
+
 const {
   TWILIO_ACCOUNT_SID,
   TWILIO_API_KEY,
@@ -25,22 +25,22 @@ const {
   TWILIO_CALLER_ID,
   PORT = 3000,
 } = process.env;
- 
+
 const app = express();
 app.use(cors());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
- 
+
 // Serve the dialer page + twilio-telephony.js from /public
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/twilio-sdk.js', express.static(path.join(__dirname, 'node_modules/@twilio/voice-sdk/dist/twilio.min.js')));
- 
+
 // --- 1. Issue an access token for a browser agent ---------------
 app.get('/token', (req, res) => {
   const identity = (req.query.agent || 'agent').toString().slice(0, 64);
   const AccessToken = twilio.jwt.AccessToken;
   const VoiceGrant = AccessToken.VoiceGrant;
- 
+
   const token = new AccessToken(
     TWILIO_ACCOUNT_SID,
     TWILIO_API_KEY,
@@ -51,15 +51,15 @@ app.get('/token', (req, res) => {
     outgoingApplicationSid: TWILIO_TWIML_APP_SID,
     incomingAllow: false,
   }));
- 
+
   res.json({ identity, token: token.toJwt() });
 });
- 
+
 // --- 2. Bridge the browser call to the contact's phone ----------
 app.post('/voice', (req, res) => {
   const to = (req.body.To || '').toString().trim();
   const twiml = new twilio.twiml.VoiceResponse();
- 
+
   // 7-15 digits only: this also blocks accidental emergency dialing (e.g. 911)
   if (!/^\+?[0-9]{7,15}$/.test(to)) {
     twiml.say('Sorry, that number is not valid.');
@@ -73,14 +73,14 @@ app.post('/voice', (req, res) => {
   }
   res.type('text/xml').send(twiml.toString());
 });
- 
+
 // --- 3. Optional: receive call status events --------------------
 app.post('/status', (req, res) => {
   const { CallSid, CallStatus, To, CallDuration } = req.body;
   console.log(`[status] ${CallSid} -> ${CallStatus} (${To}, ${CallDuration || 0}s)`);
   res.sendStatus(204);
 });
- 
+
 // --- 4. Leads / lightweight CRM -----------------------------------
 // Import a CSV's contacts into the leads table. Safe to call repeatedly
 // with the same list; existing leads (matched by phone) keep their status.
@@ -96,7 +96,7 @@ app.post('/api/leads/import', async (req, res) => {
     res.status(500).json({ error: 'import failed' });
   }
 });
- 
+
 // List leads, optionally filtered by status (?status=call_again|do_not_call|booked)
 app.get('/api/leads', async (req, res) => {
   try {
@@ -107,7 +107,7 @@ app.get('/api/leads', async (req, res) => {
     res.status(500).json({ error: 'could not load leads' });
   }
 });
- 
+
 // Update a lead after a call: disposition (what happened), status (what's
 // next), notes, and which agent worked it.
 app.patch('/api/leads/:id', async (req, res) => {
@@ -121,10 +121,37 @@ app.patch('/api/leads/:id', async (req, res) => {
     res.status(400).json({ error: e.message || 'update failed' });
   }
 });
- 
+
+// Delete a single lead outright — for clearing test/sample data, not for
+// working real leads (use status: 'do_not_call' for that instead).
+app.delete('/api/leads/:id', async (req, res) => {
+  try {
+    const ok = await db.deleteLead(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'lead not found' });
+    res.json({ deleted: true });
+  } catch (e) {
+    console.error('delete lead failed', e);
+    res.status(500).json({ error: 'delete failed' });
+  }
+});
+
+// Bulk delete — body: { ids: [1, 2, 3] }. Same use case, faster for
+// clearing a whole test batch (e.g. the sample list) at once.
+app.delete('/api/leads', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+    if (!ids.length) return res.status(400).json({ error: 'no valid ids provided' });
+    const count = await db.deleteLeads(ids);
+    res.json({ deleted: count });
+  } catch (e) {
+    console.error('bulk delete failed', e);
+    res.status(500).json({ error: 'delete failed' });
+  }
+});
+
 // Health check (handy for uptime pings on free hosting tiers)
 app.get('/healthz', (_, res) => res.send('ok'));
- 
+
 db.init()
   .then(() => {
     app.listen(PORT, () => console.log(`Power Dialer running on :${PORT}`));
@@ -133,4 +160,3 @@ db.init()
     console.error('Failed to initialize database. Is DATABASE_URL set?', e);
     process.exit(1);
   });
- 
