@@ -65,6 +65,14 @@ function TwilioTelephony({ backendUrl, agent = 'agent' }) {
     setMute(muted) {
       if (activeCall) activeCall.mute(!!muted);
     },
+
+    // Sends touch-tones into an already-connected call — e.g. "press 0 for
+    // front desk" IVR menus. Twilio's Call object supports this natively;
+    // it just wasn't wired up to any UI before now.
+    sendDigits(digits) {
+      if (activeCall) activeCall.sendDigits(digits);
+      else api.onError('No active call to send digits to');
+    },
   };
   return api;
 }
