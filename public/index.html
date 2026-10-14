@@ -378,35 +378,10 @@
     .stat .v { font-size: 16px; }
   }
 
-  /* Agent gate — asks "who's calling" once per browser so the CRM's Agent
-     column is accurate now that more than one person shares this app. */
-  #agentGate {
-    position: fixed; inset: 0; background: var(--ink); z-index: 999;
-    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 18px;
-  }
-  #agentGate.hidden { display: none; }
-  #agentGate h2 { font-family: var(--disp); font-size: 20px; }
-  #agentGate p { color: var(--text-dim); font-size: 13px; max-width: 280px; text-align: center; }
-  .agent-options { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  .agent-btn {
-    font-family: var(--disp); font-size: 15px; font-weight: 600; padding: 14px 24px;
-    border-radius: var(--r-s); border: 1px solid var(--line); background: var(--panel);
-    color: var(--text); cursor: pointer;
-  }
-  .agent-btn:hover { border-color: var(--accent); background: var(--panel-2); }
-  .agent-btn.other { font-family: var(--body); font-size: 13px; font-weight: 500; color: var(--text-dim); }
+  .who-am-i { align-self: center; color: var(--text-dim); font-size: 12px; font-family: var(--mono); }
 </style>
 </head>
 <body>
-<div id="agentGate" class="hidden">
-  <h2>Who's calling?</h2>
-  <p>Picked once per browser — used to attribute calls and lead updates in the CRM.</p>
-  <div class="agent-options">
-    <button class="agent-btn" data-agent="dean">Dean</button>
-    <button class="agent-btn" data-agent="valentinos">Valentinos</button>
-  </div>
-  <button class="agent-btn other" data-agent="other">Just uploading a list — not calling</button>
-</div>
 <div class="app">
   <header>
     <div class="brand">
@@ -420,7 +395,8 @@
       <div class="stat"><div class="k">Connect rate</div><div class="v" id="sRate">—</div></div>
       <div class="stat"><div class="k">Talk time</div><div class="v" id="sTalk">0:00</div></div>
       <a href="/crm.html" style="align-self:center;color:var(--text-dim);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 12px;border-radius:var(--r-s);">Leads →</a>
-      <a href="#" id="switchAgent" style="align-self:center;color:var(--text-faint);text-decoration:none;font-size:12px;padding:7px 4px;">Switch user</a>
+      <span class="who-am-i" id="whoAmI"></span>
+      <a href="#" id="logout" style="align-self:center;color:var(--text-faint);text-decoration:none;font-size:12px;padding:7px 4px;">Log out</a>
     </div>
   </header>
 
@@ -535,9 +511,10 @@ function DemoTelephony() {
    (2) comment out the DemoTelephony line, (3) uncomment the
    TwilioTelephony line. backendUrl:'' means "same site that served
    this page", which is correct when server.js serves it. */
-const AGENT_NAME = localStorage.getItem('pd_agent') || 'unassigned';
+// Who's calling comes from the login session on the server, not the browser.
+// The server picks the Twilio identity and the rep's own caller ID.
 // const phone = DemoTelephony();
-const phone = TwilioTelephony({ backendUrl: '', agent: AGENT_NAME });
+const phone = TwilioTelephony({ backendUrl: '' });
 
 /* ============================================================
    STATE
@@ -810,15 +787,16 @@ function saveAndNext() {
 
 // Push the call outcome to the CRM (leads table). Fire-and-forget from the
 // UI's perspective — if it fails, the call still moves on and the lead just
-// won't show the update to other reps until it succeeds. Errors are logged.
+// won't show the update in the CRM. Errors are logged.
 async function saveLeadToServer(contact, disposition, notes, status) {
   if (!contact.id) return; // lead isn't backed by the DB (e.g. offline demo list)
   try {
     const r = await fetch(`${BACKEND_URL}/api/leads/${contact.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ disposition, notes, status, agent: AGENT_NAME }),
+      body: JSON.stringify({ disposition, notes, status }),
     });
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error(`status ${r.status}`);
   } catch (e) {
     console.error('Failed to save lead update to server', e);
@@ -902,13 +880,14 @@ async function loadRows(rows) {
   state.stats = { dials: 0, connects: 0, talkSec: 0 };
 
   try {
-    // Upsert into the leads DB (matched by phone) — existing history for
-    // people already in the CRM is preserved, not overwritten.
+    // Upsert into this rep's own leads (matched by phone) — existing history
+    // for people already in their list is preserved, not overwritten.
     const r = await fetch(`${BACKEND_URL}/api/leads/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contacts }),
     });
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error(`import failed: ${r.status}`);
     const { leads } = await r.json();
     state.contacts = leads.map(leadToContact);
@@ -923,11 +902,12 @@ async function loadRows(rows) {
   resetToIdle(); renderLog();
 }
 
-// Pull whatever's already in the CRM on page load, so a rep opening the
-// dialer fresh sees the live shared queue, not an empty screen.
+// Pull this rep's own leads on page load, so opening the dialer fresh shows
+// their queue, not an empty screen.
 async function loadLeadsFromServer() {
   try {
     const r = await fetch(`${BACKEND_URL}/api/leads`);
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error(`status ${r.status}`);
     const { leads } = await r.json();
     if (!leads.length) return; // nothing imported yet — wait for CSV/sample
@@ -993,27 +973,27 @@ document.addEventListener('keydown', (e) => {
 renderKeypad();
 renderAll();
 
-$('switchAgent').onclick = (e) => {
+function toLogin() { location.href = '/login.html'; }
+
+$('logout').onclick = async (e) => {
   e.preventDefault();
-  localStorage.removeItem('pd_agent');
-  location.reload();
+  try { await fetch('/api/logout', { method: 'POST' }); } catch (_) {}
+  toLogin();
 };
 
-// Show the "who's calling" gate if this browser hasn't picked an agent yet.
-// Picking one reloads the page so the Twilio device (and every save from
-// here on) is tagged correctly — simpler and more reliable than trying to
-// swap identities on an already-registered device mid-session.
-if (AGENT_NAME === 'unassigned') {
-  $('agentGate').classList.remove('hidden');
-  $('agentGate').querySelectorAll('[data-agent]').forEach(btn => {
-    btn.onclick = () => {
-      localStorage.setItem('pd_agent', btn.dataset.agent);
-      location.reload();
-    };
-  });
-} else {
+// Show who's logged in and which number their calls go out from, then load
+// their leads.
+(async () => {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) return toLogin();
+    const me = await r.json();
+    $('whoAmI').textContent = me.username + (me.caller_id ? ' · ' + me.caller_id : '');
+  } catch (e) {
+    console.error('Could not load account info', e);
+  }
   loadLeadsFromServer();
-}
+})();
 </script>
 </body>
 </html>

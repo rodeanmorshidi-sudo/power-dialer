@@ -99,19 +99,43 @@
   .saved-flash.show { opacity: 1; }
   .empty { text-align: center; padding: 60px 20px; color: var(--text-faint); }
   .empty a { color: var(--accent); }
+  select.owner-filter {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-s);
+    padding: 8px 10px; color: var(--text); font-family: var(--body); font-size: 13px;
+  }
+  body:not(.is-admin) .admin-only { display: none !important; }
+  .owner-tag { font-size: 11px; font-family: var(--mono); color: var(--text-dim); }
+  .owner-tag.none { color: var(--ring); }
+  .import-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .import-bar .label { color: var(--text-dim); font-size: 12px; }
+  .header-right { display: flex; gap: 10px; align-items: center; }
+  .who { color: var(--text-dim); font-size: 12px; font-family: var(--mono); }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Leads</h1>
-    <a href="/">&larr; Back to dialer</a>
+    <div class="header-right">
+      <span class="who" id="who"></span>
+      <a href="/">&larr; Back to dialer</a>
+      <a href="#" id="logout">Log out</a>
+    </div>
   </header>
+
+  <div class="import-bar admin-only">
+    <span class="label">Admin: load a CSV into</span>
+    <select class="owner-filter" id="importOwner"></select>
+    <button class="btn" id="btnImport">Upload CSV</button>
+    <input type="file" id="fileInput" accept=".csv" hidden />
+  </div>
 
   <div class="stats" id="stats"></div>
 
   <div class="toolbar">
     <div class="tabs" id="tabs"></div>
+    <select class="owner-filter admin-only" id="ownerFilter" aria-label="Filter by rep"></select>
     <input type="search" id="search" placeholder="Search name, company, phone…" />
     <button class="btn btn-danger" id="btnDeleteSelected" disabled>Delete selected (0)</button>
     <button class="btn" id="btnRefresh">Refresh</button>
@@ -128,6 +152,9 @@ const STATUSES = [
   { id: 'exhausted',   label: 'Exhausted (3 tries)' },
 ];
 let allLeads = [];
+let me = null;
+let users = [];
+let ownerFilter = 'all';
 let activeTab = 'all';
 let selectedIds = new Set();
 
@@ -138,7 +165,8 @@ async function loadLeads() {
   $('tableWrap').innerHTML = '<div class="empty">Loading…</div>';
   selectedIds.clear();
   try {
-    const r = await fetch('/api/leads');
+    const r = await fetch(me && me.is_admin ? '/api/leads?scope=all' : '/api/leads');
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error('status ' + r.status);
     const { leads } = await r.json();
     allLeads = leads;
@@ -151,9 +179,16 @@ async function loadLeads() {
   }
 }
 
+function ownerLeads() {
+  if (ownerFilter === 'all') return allLeads;
+  if (ownerFilter === '__none') return allLeads.filter(l => !l.owner);
+  return allLeads.filter(l => l.owner === ownerFilter);
+}
+
 function renderStats() {
-  const counts = { all: allLeads.length, call_again: 0, do_not_call: 0, booked: 0, exhausted: 0 };
-  allLeads.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
+  const scoped = ownerLeads();
+  const counts = { all: scoped.length, call_again: 0, do_not_call: 0, booked: 0, exhausted: 0 };
+  scoped.forEach(l => { if (counts[l.status] !== undefined) counts[l.status]++; });
   $('stats').innerHTML = `
     <div class="stat"><div class="n">${counts.all}</div><div class="l">Total leads</div></div>
     <div class="stat"><div class="n">${counts.call_again}</div><div class="l">Call again</div></div>
@@ -177,7 +212,7 @@ function renderTabs() {
 
 function filteredLeads() {
   const q = $('search').value.trim().toLowerCase();
-  return allLeads.filter(l => {
+  return ownerLeads().filter(l => {
     if (activeTab !== 'all' && l.status !== activeTab) return false;
     if (!q) return true;
     return [l.name, l.company, l.phone, l.title].some(f => (f || '').toLowerCase().includes(q));
@@ -214,6 +249,7 @@ function renderTable() {
       </td>
       <td class="meta">${l.call_count || 0}</td>
       <td class="meta">${esc(l.agent || '—')}</td>
+      ${me && me.is_admin ? `<td>${l.owner ? `<span class="owner-tag">${esc(l.owner)}</span>` : '<span class="owner-tag none">Unassigned</span>'}</td>` : ''}
       <td class="meta">${l.last_called_at ? new Date(l.last_called_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—'}</td>
       <td class="meta">${l.updated_at ? new Date(l.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
     </tr>
@@ -223,7 +259,7 @@ function renderTable() {
     <table>
       <thead><tr>
         <th><input type="checkbox" id="checkAll" /></th>
-        <th>Lead</th><th>Phone</th><th>Status</th><th>Last call</th><th>Attempts</th><th>Notes</th><th>Calls</th><th>Agent</th><th>Last dialed</th><th>Updated</th>
+        <th>Lead</th><th>Phone</th><th>Status</th><th>Last call</th><th>Attempts</th><th>Notes</th><th>Calls</th><th>Agent</th>${me && me.is_admin ? '<th>Owner</th>' : ''}<th>Last dialed</th><th>Updated</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -277,6 +313,7 @@ async function deleteSelected() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     });
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error('status ' + r.status);
     allLeads = allLeads.filter(l => !selectedIds.has(l.id));
     selectedIds.clear();
@@ -295,10 +332,11 @@ async function saveLead(id, patch, flashEl) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
+    if (r.status === 401) return toLogin();
     if (!r.ok) throw new Error('status ' + r.status);
     const { lead } = await r.json();
     const idx = allLeads.findIndex(l => l.id === lead.id);
-    if (idx !== -1) allLeads[idx] = lead;
+    if (idx !== -1) allLeads[idx] = { ...lead, owner: allLeads[idx].owner };
     if (flashEl) {
       flashEl.classList.add('show');
       setTimeout(() => flashEl.classList.remove('show'), 1200);
@@ -310,11 +348,80 @@ async function saveLead(id, patch, flashEl) {
   }
 }
 
+function toLogin() { location.href = '/login.html'; }
+
+$('logout').onclick = async (e) => {
+  e.preventDefault();
+  try { await fetch('/api/logout', { method: 'POST' }); } catch (_) {}
+  toLogin();
+};
+
+function renderOwnerControls() {
+  const opts = users.map(u => `<option value="${esc(u.username)}">${esc(u.username)}</option>`).join('');
+  $('ownerFilter').innerHTML =
+    '<option value="all">All reps</option>' + opts + '<option value="__none">Unassigned (old data)</option>';
+  $('ownerFilter').value = ownerFilter;
+  $('importOwner').innerHTML = users.map(u => `<option value="${u.id}">${esc(u.username)}</option>`).join('');
+}
+
+// Admins: load a CSV straight into any rep's list.
+function importCsv(rows) {
+  const pick = (obj, keys) => {
+    for (const k of Object.keys(obj)) if (keys.some(t => k.toLowerCase().trim().includes(t))) return obj[k];
+    return '';
+  };
+  const contacts = rows.map(r => {
+    const name = pick(r, ['full name', 'name']) || [pick(r, ['first']), pick(r, ['last'])].filter(Boolean).join(' ') || 'Unknown';
+    return {
+      name: String(name).trim(),
+      company: String(pick(r, ['company', 'org', 'account']) || '').trim(),
+      title: String(pick(r, ['title', 'role', 'position']) || '').trim(),
+      phone: String(pick(r, ['phone', 'mobile', 'number', 'tel', 'cell']) || '').trim(),
+    };
+  }).filter(c => c.phone);
+  if (!contacts.length) { alert('No rows with a usable phone number were found.'); return; }
+  const ownerId = Number($('importOwner').value);
+  const owner = users.find(u => u.id === ownerId);
+  if (!confirm(`Load ${contacts.length} contacts into ${owner ? owner.username : 'that rep'}'s list?`)) return;
+  fetch('/api/leads/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contacts, owner_id: ownerId }),
+  }).then(r => {
+    if (r.status === 401) return toLogin();
+    if (!r.ok) throw new Error('status ' + r.status);
+    loadLeads();
+  }).catch(e => { console.error(e); alert('Import failed. Try again.'); });
+}
+
 $('search').addEventListener('input', renderTable);
 $('btnRefresh').onclick = loadLeads;
 $('btnDeleteSelected').onclick = deleteSelected;
+$('ownerFilter').onchange = () => { ownerFilter = $('ownerFilter').value; selectedIds.clear(); renderStats(); renderTable(); };
+$('btnImport').onclick = () => $('fileInput').click();
+$('fileInput').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  Papa.parse(f, { header: true, skipEmptyLines: true, complete: (res) => importCsv(res.data) });
+  e.target.value = '';
+};
 
-loadLeads();
+(async () => {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) return toLogin();
+    me = await r.json();
+    $('who').textContent = me.username + (me.is_admin ? ' · admin' : '');
+    if (me.is_admin) {
+      document.body.classList.add('is-admin');
+      const ur = await fetch('/api/users');
+      if (ur.ok) users = (await ur.json()).users;
+      renderOwnerControls();
+    }
+  } catch (e) {
+    console.error('Could not load account info', e);
+  }
+  loadLeads();
+})();
 </script>
 </body>
 </html>

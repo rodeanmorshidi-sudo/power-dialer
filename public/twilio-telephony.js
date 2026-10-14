@@ -9,13 +9,14 @@
  *   3. In index.html, replace
  *        const phone = DemoTelephony();
  *      with
- *        const phone = TwilioTelephony({ backendUrl: 'https://YOUR-BACKEND', agent: 'dean' });
+ *        const phone = TwilioTelephony({ backendUrl: '' });
  *
  * Same interface the UI expects:
  *   dial(number), hangup(), setMute(bool)
  *   onRinging(), onConnected(), onDisconnected(), onError(msg)
  */
-function TwilioTelephony({ backendUrl, agent = 'agent' }) {
+function TwilioTelephony({ backendUrl = '' } = {}) {
+  // The server works out who's calling from the login session.
   let device = null;
   let activeCall = null;
   let ready = null; // promise that resolves once the Device is registered
@@ -26,14 +27,14 @@ function TwilioTelephony({ backendUrl, agent = 'agent' }) {
     async _ensureDevice() {
       if (ready) return ready;
       ready = (async () => {
-        const r = await fetch(`${backendUrl}/token?agent=${encodeURIComponent(agent)}`);
+        const r = await fetch(`${backendUrl}/token`);
         if (!r.ok) throw new Error('token request failed');
         const { token } = await r.json();
         device = new Twilio.Device(token, { codecPreferences: ['opus', 'pcmu'] });
         device.on('error', (e) => api.onError(e && e.message));
         // refresh the token before it expires
         device.on('tokenWillExpire', async () => {
-          const rr = await fetch(`${backendUrl}/token?agent=${encodeURIComponent(agent)}`);
+          const rr = await fetch(`${backendUrl}/token`);
           const { token: t } = await rr.json();
           device.updateToken(t);
         });

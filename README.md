@@ -106,11 +106,27 @@ Edit `public/index.html` (in your GitHub repo) and:
 - Change the header badge text from "Demo" so reps aren't confused.
 - Commit. Render redeploys.
 
-### 7. Your reps start calling
-Send both reps the Render URL. They open it in Chrome, allow microphone access
-once, load a CSV, and dial. That's it - nothing runs on your laptop, nothing for
-them to install. Give each rep a different `agent` value if you want them tracked
-separately (e.g. `agent: 'dean'`, `agent: 'rep2'`).
+### 7. Create rep accounts
+Every rep logs in with their own username and password. Each rep only sees
+their own leads; admins see everyone's in the CRM and can load a CSV into any
+rep's list. Each rep can have their own Twilio number as caller ID (it must be
+in the same Twilio account); anyone without one uses `TWILIO_CALLER_ID`.
+
+Run these in Render: your service > **Shell** (or locally with `DATABASE_URL` set):
+
+    node scripts/users.js add james --number +16505551234
+    node scripts/users.js add dean --admin
+    node scripts/users.js list
+    node scripts/users.js reset-password james
+    node scripts/users.js set james --number +16505559999
+    node scripts/users.js remove james
+
+Passwords are randomly generated and printed once; only a hash is stored. If
+one is lost, run `reset-password` (that also logs the rep out everywhere).
+
+### 8. Your reps start calling
+Send each rep the Render URL and their login. They open it in Chrome, log in,
+allow microphone access once, and dial.
 
 ---
 

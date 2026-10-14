@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log in · Power Dialer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap');
+  :root {
+    --ink: #14171D; --panel: #1B1F27; --panel-2: #21262F; --line: #2C323D;
+    --text: #E8EAED; --text-dim: #9AA3AF; --end: #E0654E; --accent: #6E9BF0; --live: #3DBE8B;
+    --r: 10px; --r-s: 7px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px; display: flex; align-items: center; justify-content: center; padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  form {
+    width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 28px 24px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--live); }
+  h1 { font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 20px; font-weight: 700; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  input {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-s);
+    padding: 10px 12px; color: var(--text); font-family: inherit; font-size: 14px;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    margin-top: 4px; padding: 11px; border-radius: var(--r-s); border: none; cursor: pointer;
+    background: var(--live); color: #0B1A13; font-family: inherit; font-size: 14px; font-weight: 600;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  .err { color: var(--end); font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<form id="form" autocomplete="on">
+  <div class="brand"><span class="brand-dot"></span><h1>Power Dialer</h1></div>
+  <label>Username
+    <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus />
+  </label>
+  <label>Password
+    <input id="password" name="password" type="password" autocomplete="current-password" required />
+  </label>
+  <div class="err" id="err" role="alert"></div>
+  <button type="submit" id="btn">Log in</button>
+</form>
+<script>
+const form = document.getElementById('form');
+const err = document.getElementById('err');
+const btn = document.getElementById('btn');
+form.onsubmit = async (e) => {
+  e.preventDefault();
+  err.textContent = '';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value,
+      }),
+    });
+    if (r.ok) { location.href = '/'; return; }
+    const data = await r.json().catch(() => ({}));
+    err.textContent = data.error || 'Login failed.';
+  } catch (_) {
+    err.textContent = 'Could not reach the server. Check your connection.';
+  }
+  btn.disabled = false;
+};
+</script>
+</body>
+</html>
